@@ -1,4 +1,4 @@
-import os, threading, io, glob, tempfile
+import os, threading, io, glob, tempfile, requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import telebot
 from telebot import types
@@ -22,49 +22,85 @@ user_videos = {}
 
 @bot.message_handler(commands=['start'])
 def start(m):
-    bot.send_message(m.chat.id, "Salom! 🎬 Link tashlang. Videoni yuklab beraman + film nomini topaman!")
+    bot.send_message(m.chat.id, "Salom! 🎬 YouTube, Insta, TikTok link tashlang. 100% yuklab beraman!")
 
-def get_ydl_opts(tmpdir):
-    opts = {
-        'outtmpl': f'{tmpdir}/video.%(ext)s',
-        'format': 'best[ext=mp4]/best',
-        'quiet': True,
-        'nocheckcertificate': True,
-        'extractor_args': {'youtube': {'player_client': ['android','ios','web']}},
-    }
-    if os.path.exists("cookies.txt"):
-        opts['cookiefile'] = "cookies.txt"
-    return opts
+def download_via_cobalt(url, tmpdir):
+    # Boshqa botlar ishlatadigan API lar
+    apis = ["https://api.cobalt.tools/api/json", "https://co.wuk.sh/api/json", "https://api.ownv.id/api/json"]
+    for api in apis:
+        try:
+            r = requests.post(api, json={"url": url, "vQuality": "720", "aFormat": "mp3", "isAudioOnly": False},
+                              headers={"Accept": "application/json", "Content-Type": "application/json"}, timeout=20)
+            data = r.json()
+            dl_url = data.get('url') or data.get('link')
+            if dl_url:
+                video_data = requests.get(dl_url, timeout=60, stream=True)
+                ext = ".mp4"
+                if "video/webm" in str(data): ext = ".webm"
+                path = f"{tmpdir}/video{ext}"
+                with open(path, 'wb') as f:
+                    for chunk in video_data.iter_content(1024*1024):
+                        f.write(chunk)
+                return path
+        except Exception as e:
+            print(f"Cobalt {api} failed: {e}")
+            continue
+    return None
 
 @bot.message_handler(content_types=['text'])
 def handle_link(m):
     if 'http' not in m.text.lower(): return
     url = m.text.strip()
-    status = bot.send_message(m.chat.id, "📥 Yuklanmoqda...")
+    status = bot.send_message(m.chat.id, "🔗 Qabul qilindi...\n📥 Boshqa botlar usulida yuklanmoqda 50%...")
+    video_path = None
+    tmpdir_obj = tempfile.TemporaryDirectory()
+    tmpdir = tmpdir_obj.name
+
     try:
-        import yt_dlp
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with yt_dlp.YoutubeDL(get_ydl_opts(tmpdir)) as ydl:
+        # 1-USUL: Cobalt (eng kuchlisi)
+        video_path = download_via_cobalt(url, tmpdir)
+
+        # 2-USUL: Agar Cobalt ishlamasa yt-dlp
+        if not video_path:
+            bot.edit_message_text("🔗 Cobalt ishlamadi, 2-usul sinab ko'rilmoqda 70%...", m.chat.id, status.message_id)
+            import yt_dlp
+            opts = {
+                'outtmpl': f'{tmpdir}/video.%(ext)s',
+                'format': 'best[ext=mp4]/best',
+                'quiet': True,
+                'nocheckcertificate': True,
+                'extractor_args': {'youtube': {'player_client': ['android','ios']}},
+            }
+            if os.path.exists("cookies.txt"): opts['cookiefile'] = "cookies.txt"
+            with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.extract_info(url, download=True)
                 files = glob.glob(f"{tmpdir}/*")
-                video_path = files[0]
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("🎬 Film nomi?", callback_data="find"))
-            with open(video_path, 'rb') as v:
-                sent = bot.send_video(m.chat.id, v, caption="✅ Tayyor! Bosing 👇", reply_markup=markup)
-            user_videos[m.chat.id] = sent.video.file_id
-            bot.delete_message(m.chat.id, status.message_id)
-    except Exception as e:
-        if "Sign in to confirm" in str(e):
-            bot.edit_message_text("⚠️ YouTube blokladi. Iltimos GitHub ga cookies.txt yuklang, shunda 100% ishlaydi.", m.chat.id, status.message_id)
-        else:
-            bot.edit_message_text(f"Xatolik: {e}", m.chat.id, status.message_id)
+                if files: video_path = files[0]
 
-@bot.callback_query_handler(func=lambda call: call.data == "find")
+        if not video_path or not os.path.exists(video_path):
+            raise Exception("Yuklab bo'lmadi")
+
+        bot.edit_message_text("✅ Yuklandi, yuborilmoqda...", m.chat.id, status.message_id)
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🎬 Film nomi?", callback_data="find"))
+
+        with open(video_path, 'rb') as v:
+            sent = bot.send_video(m.chat.id, v, caption="✅ Video tayyor! Filmni bilish uchun bosing 👇", reply_markup=markup)
+
+        user_videos[m.chat.id] = sent.video.file_id
+        bot.delete_message(m.chat.id, status.message_id)
+        tmpdir_obj.cleanup()
+
+    except Exception as e:
+        tmpdir_obj.cleanup()
+        bot.edit_message_text(f"⚠️ Xatolik: {e}\n\nLinkni tekshiring, yoki screenshot tashlang.", m.chat.id, status.message_id)
+
+@bot.callback_query_handler(func=lambda call: True)
 def handle_button(call):
     chat_id = call.message.chat.id
-    bot.answer_callback_query(call.id, "Topilmoqda...")
-    msg = bot.send_message(chat_id, "🧠 Aniqlanmoqda...")
+    if chat_id not in user_videos: return
+    bot.answer_callback_query(call.id, "Aniqlanmoqda...")
+    msg = bot.send_message(chat_id, "🧠 AI o'ylamoqda...")
     try:
         import cv2
         file_info = bot.get_file(user_videos[chat_id])
