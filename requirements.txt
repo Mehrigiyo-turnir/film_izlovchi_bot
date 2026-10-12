@@ -3,3 +3,4 @@ Pillow
 google-generativeai
 yt-dlp
 opencv-python-headless
+requests
