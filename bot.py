@@ -17,15 +17,28 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
-# XATO TUZATILDI
-model = genai.GenerativeModel('gemini-2.0-flash')
+
+# ENG YANGI MODELNI TOPISH
+def get_model():
+    try:
+        # Google tavsiya qilgan eng yangi nomlar
+        for name in ['models/gemini-2.5-flash', 'models/gemini-2.0-flash', 'models/gemini-1.5-flash', 'gemini-1.5-flash-latest']:
+            try:
+                m = genai.GenerativeModel(name)
+                # test
+                return m
+            except: continue
+    except: pass
+    return genai.GenerativeModel('models/gemini-2.5-flash')
+
+model = get_model()
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 user_videos = {}
 
 @bot.message_handler(commands=['start'])
 def start(m):
-    bot.send_message(m.chat.id, "Salom! 👋 Instagram, TikTok link yoki rasm tashlang. Videoni yuklab beraman va film nomini topaman 🎬")
+    bot.send_message(m.chat.id, "Salom! 👋 Link yoki rasm tashlang, filmni topib beraman 🎬")
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(m):
@@ -59,7 +72,7 @@ def handle_link(m):
             user_videos[m.from_user.id] = sent.video.file_id
             bot.delete_message(m.chat.id, status.message_id)
     except Exception as e:
-        bot.edit_message_text(f"⚠️ Yuklab bo'lmadi: {e}\nScreenshot tashlang", m.chat.id, status.message_id)
+        bot.edit_message_text(f"⚠️ Yuklab bo'lmadi: {e}", m.chat.id, status.message_id)
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_button(call):
@@ -79,11 +92,12 @@ def handle_button(call):
         cap.set(cv2.CAP_PROP_POS_MSEC, 1500)
         ret, frame = cap.read()
         cap.release(); os.remove(tf_path)
+        if not ret: raise Exception("Kadr olinmadi")
         _, buffer = cv2.imencode('.jpg', frame)
         image = Image.open(io.BytesIO(buffer.tobytes()))
         response = model.generate_content(["Bu kadr qaysi filmdan? Film nomini, yilini ayt o'zbek tilida.", image])
         bot.edit_message_text(f"🎬 Topildi!\n\n{response.text}", call.message.chat.id, msg.message_id)
     except Exception as e:
-        bot.edit_message_text(f"Xatolik: {e}", call.message.chat.id, msg.message_id)
+        bot.edit_message_text(f"Xatolik: {e}\nModel: {model.model_name}", call.message.chat.id, msg.message_id)
 
 bot.infinity_polling()
