@@ -16,30 +16,48 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI = os.environ.get("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI)
 
-model = genai.GenerativeModel('gemini-1.5-flash')
-model2 = genai.GenerativeModel('gemini-2.0-flash')
-
 bot = telebot.TeleBot(TOKEN)
 user_videos = {}
 
+def get_working_model():
+    # Google tez-tez nomini o'zgartiradi, shuning uchun bir nechta nomni sinaymiz
+    candidates = [
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+        "gemini-flash-latest",
+        "models/gemini-2.0-flash",
+        "models/gemini-flash-latest",
+    ]
+    for name in candidates:
+        try:
+            m = genai.GenerativeModel(name)
+            # kichik test
+            m.generate_content("hi")
+            print(f"Model ishladi: {name}")
+            return m
+        except Exception as e:
+            print(f"Model ishlamadi {name}: {e}")
+            continue
+    return genai.GenerativeModel("gemini-2.0-flash")
+
+model = get_working_model()
+
 @bot.message_handler(commands=['start'])
 def start(m):
-    bot.send_message(m.chat.id, "Salom! 🎬 Instagram Reels link tashlang, 2 ta AI filmni topib beradi!")
+    bot.send_message(m.chat.id, "Salom! Instagram Reels tashlang, filmni topaman!")
 
 @bot.message_handler(content_types=['text'])
 def handle(m):
-    if 'instagram.com' not in m.text and 'tiktok.com' not in m.text and 'http' not in m.text:
-        return
+    if 'http' not in m.text: return
     url = m.text.strip()
     status = bot.send_message(m.chat.id, "📥 Yuklanmoqda...")
     try:
         import yt_dlp
         with tempfile.TemporaryDirectory() as tmpdir:
-            opts = {'outtmpl': f'{tmpdir}/video.%(ext)s', 'format': 'best', 'quiet': True, 'nocheckcertificate': True}
+            opts = {'outtmpl': f'{tmpdir}/video.%(ext)s', 'format': 'best', 'quiet': True}
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.extract_info(url, download=True)
-                files = glob.glob(f"{tmpdir}/*")
-                path = files[0]
+                path = glob.glob(f"{tmpdir}/*")[0]
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🎬 Film nomi? (2 AI)", callback_data="find"))
             with open(path, 'rb') as v:
@@ -47,22 +65,20 @@ def handle(m):
             user_videos[m.chat.id] = sent.video.file_id
             bot.delete_message(m.chat.id, status.message_id)
     except Exception as e:
-        bot.edit_message_text(f"⚠️ Xato: {e}", m.chat.id, status.message_id)
+        bot.edit_message_text(f"Xato: {e}", m.chat.id, status.message_id)
 
 @bot.callback_query_handler(func=lambda c: True)
 def cb(call):
     chat_id = call.message.chat.id
     if chat_id not in user_videos: return
-    bot.answer_callback_query(call.id, "2 ta AI tekshirmoqda...")
-    msg = bot.send_message(chat_id, "🧠 2 ta AI + 3 ta kadr tekshirilmoqda...")
-
+    bot.answer_callback_query(call.id, "Tekshirilmoqda...")
+    msg = bot.send_message(chat_id, "🧠 AI tekshirmoqda, 3 ta kadr...")
     try:
         import cv2
         f = bot.get_file(user_videos[chat_id])
         d = bot.download_file(f.file_path)
         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf:
             tf.write(d); p=tf.name
-
         cap = cv2.VideoCapture(p)
         frames = []
         for msec in [1000, 3000, 6000]:
@@ -73,32 +89,10 @@ def cb(call):
                 frames.append(Image.open(io.BytesIO(buf.tobytes())))
         cap.release(); os.remove(p)
 
-        prompt = """Bu 3 ta kadr bitta kinodan. Filmni top.
-        Javob formati:
-        1. Nomi (original va o'zbekcha)
-        2. Yili
-        3. Aktyorlar
-        4. Qisqa mazmuni (2 jumla)
-        O'zbek tilida javob ber. Agar topa olmasang 'topilmadi' de."""
-
-        res1_text = "topilmadi"
-        try:
-            res1 = model.generate_content([prompt] + frames)
-            res1_text = res1.text
-        except Exception as e:
-            res1_text = f"1-AI xato: {e}"
-
-        if "topilmadi" in res1_text.lower() or len(res1_text) < 30:
-            try:
-                res2 = model2.generate_content([prompt + " Juda aniq top. Agar hind filmi bo'lsa ham nomini ayt."] + frames)
-                final = f"🎬 1-AI o'yladi: {res1_text}\n\n🎬🎬 2-AI aniqlashtirdi:\n{res2.text}"
-            except Exception as e:
-                final = f"🎬 {res1_text}\n\n2-AI xato: {e}"
-        else:
-            final = f"🎬 {res1_text}"
-
-        bot.edit_message_text(final, chat_id, msg.message_id)
+        prompt = "Bu 3 kadr bitta film/serialdan. Nomini, yilini, aktyorlarini o'zbek tilida ayt. Topa olmasang ham taxmin qil."
+        res = model.generate_content([prompt] + frames)
+        bot.edit_message_text(f"🎬 {res.text}", chat_id, msg.message_id)
     except Exception as e:
-        bot.edit_message_text(f"Xato: {e}", chat_id, msg.message_id)
+        bot.edit_message_text(f"AI xato: {e}", chat_id, msg.message_id)
 
 bot.infinity_polling()
