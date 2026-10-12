@@ -71,7 +71,13 @@ def handle_other(m):
             import yt_dlp, cv2
             bot.edit_message_text("🔗 Link qabul qilindi...\n📥 Video yuklanmoqda 50%...", m.chat.id, status.message_id)
             with tempfile.TemporaryDirectory() as tmpdir:
-                ydl_opts = {'outtmpl': f'{tmpdir}/video.%(ext)s', 'format': 'best[height<=480]', 'quiet': True, 'no_warnings': True}
+                ydl_opts = {
+                    'outtmpl': f'{tmpdir}/video.%(ext)s',
+                    'format': 'best',
+                    'quiet': True,
+                    'no_warnings': True,
+                    'nocheckcertificate': True
+                }
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.extract_info(url, download=True)
                     files = glob.glob(f"{tmpdir}/*")
