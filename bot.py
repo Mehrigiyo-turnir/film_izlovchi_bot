@@ -19,20 +19,33 @@ threading.Thread(target=run_web, daemon=True).start()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 SECRET_KEY = "kino123"
+ALLOWED_FILE = "allowed_users.txt"
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
+# XOTIRANI FAYLGA SAQLASH - ENDI UNUTILMAYDI
 allowed_users = set()
+if os.path.exists(ALLOWED_FILE):
+    with open(ALLOWED_FILE, "r") as f:
+        for line in f:
+            try: allowed_users.add(int(line.strip()))
+            except: pass
+
+def save_user(user_id):
+    allowed_users.add(user_id)
+    with open(ALLOWED_FILE, "a") as f:
+        f.write(f"{user_id}\n")
 
 @bot.message_handler(commands=['start'])
 def start(m):
     args = m.text.split()
     if len(args) > 1 and args[1] == SECRET_KEY:
-        allowed_users.add(m.from_user.id)
-        bot.send_message(m.chat.id, "✅ Xush kelibsiz! Endi rasm, video yoki Instagram link tashlang 🎬")
+        save_user(m.from_user.id)
+        bot.send_message(m.chat.id, "✅ Xush kelibsiz! Endi bir marta kirdingiz, boshqa link so'ramaydi. Rasm yoki link tashlang 🎬")
     elif m.from_user.id in allowed_users:
-        bot.send_message(m.chat.id, "Salom! Rasm, video yoki link tashlang 🎬")
+        bot.send_message(m.chat.id, "Salom! Qaytganingizdan xursandman 😊 Rasm, video yoki link tashlang 🎬")
     else:
         bot.send_message(m.chat.id, "⛔ Bu bot shaxsiy. Kirish uchun maxsus link kerak.")
 
@@ -71,13 +84,7 @@ def handle_other(m):
             import yt_dlp, cv2
             bot.edit_message_text("🔗 Link qabul qilindi...\n📥 Video yuklanmoqda 50%...", m.chat.id, status.message_id)
             with tempfile.TemporaryDirectory() as tmpdir:
-                ydl_opts = {
-                    'outtmpl': f'{tmpdir}/video.%(ext)s',
-                    'format': 'best',
-                    'quiet': True,
-                    'no_warnings': True,
-                    'nocheckcertificate': True
-                }
+                ydl_opts = {'outtmpl': f'{tmpdir}/video.%(ext)s', 'format': 'best', 'quiet': True, 'no_warnings': True}
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.extract_info(url, download=True)
                     files = glob.glob(f"{tmpdir}/*")
