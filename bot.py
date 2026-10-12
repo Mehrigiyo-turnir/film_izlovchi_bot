@@ -1,12 +1,11 @@
 import os
 import requests
 import tempfile
-import yt_dlp
+from PIL import Image
 import google.generativeai as genai
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Kalitlarni Render dan oladi
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
@@ -14,116 +13,59 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Salom! 🎬 Menga kino dan video / rasm yoki Instagram link tashlang.\n"
-        "Men avval trace.moe da, topolmasam Gemini AI da qidiraman."
-    )
+    await update.message.reply_text("Salom! 🎬 Kino dan rasm yoki 5 sekund video yuboring.")
 
 def search_trace_moe(image_path):
     try:
         with open(image_path, 'rb') as f:
-            r = requests.post('https://api.trace.moe/search', files={'image': f}, timeout=20)
+            r = requests.post('https://api.trace.moe/search', files={'image': f}, timeout=30)
         data = r.json()
-        if data.get('result') and len(data['result']) > 0:
+        if data.get('result'):
             best = data['result'][0]
-            # similarity 85% dan yuqori bo'lsa aniq topildi deb olamiz
-            if best['similarity'] > 0.85:
+            if best['similarity'] > 0.80:
                 return best
-    except Exception as e:
-        print(f"trace.moe xato: {e}")
+    except:
+        pass
     return None
 
-def search_gemini(image_path, caption="Bu qaysi kino yoki serialdan?"):
-    try:
-        img = genai.upload_file(image_path)
-        prompt = f"""
-        Sen kino mutaxassisisan. Rasmni ko'rib qaysi kino/serial ekanini top.
-        Agar topsang: Nomi, Yili, Qisqacha syujeti, Aktyorlari haqida o'zbek tilida javob ber.
-        Agar topolmasang halol ayt.
-        Savol: {caption}
-        """
-        response = model.generate_content([img, prompt])
-        return response.text
-    except Exception as e:
-        print(f"Gemini xato: {e}")
-        return f"Gemini da xato: {e}"
-
-async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = await update.message.reply_text("⏳ Qidiryapman... avval trace.moe tekshirilmoqda")
-
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    status = await update.message.reply_text("⏳ Qidiryapman...")
     tmp_path = None
     try:
-        # Faylni yuklab olish
-        if update.message.video or update.message.document:
-            file = await (update.message.video or update.message.document).get_file()
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-            tmp_path = tmp.name
-            await file.download_to_drive(tmp_path)
-            # Videodan rasm olish uchun yt-dlp bilan emas, oddiy yo'l - trace.moe videoni ham qabul qiladi
-            # Lekin biz birinchi kadrni rasm qilib jo'natamiz - soddalik uchun shu videoni rasm sifatida yuboramiz
-            # trace.moe API rasm kutadi, shuning uchun biz videodan screenshot ololmaymiz, Gemini ga beramiz
-            # Shuning uchun video bo'lsa to'g'ridan to'g'ri Gemini ga o'tkazamiz yoki trace.moe uchun rasm ajratib olamiz
-            # Hozircha Gemini ga beramiz va trace.moe ni ham sinab ko'ramiz
-            image_for_search = tmp_path
-
-        elif update.message.photo:
+        if update.message.photo:
             file = await update.message.photo[-1].get_file()
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.jpg')
-            tmp_path = tmp.name
+            tmp_path = tempfile.mktemp(suffix='.jpg')
             await file.download_to_drive(tmp_path)
-            image_for_search = tmp_path
-
-        else: # Link bo'lsa
-            text = update.message.text
-            if "instagram.com" in text or "tiktok.com" in text or "youtu" in text:
-                await msg.edit_text("🔗 Link yuklanmoqda...")
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-                tmp_path = tmp.name
-                ydl_opts = {'outtmpl': tmp_path, 'format': 'mp4', 'quiet': True}
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([text])
-                image_for_search = tmp_path
-            else:
-                await msg.edit_text("Iltimos video, rasm yoki link tashlang")
-                return
-
-        # 1-QADAM: trace.moe
-        await msg.edit_text("🔍 trace.moe da qidiryapman...")
-        trace_result = search_trace_moe(image_for_search)
-
-        if trace_result:
-            title = trace_result.get('filename', 'Noma\'lum')
-            anilist = trace_result.get('anilist', {})
-            sim = round(trace_result['similarity']*100, 2)
-            from_sec = int(trace_result.get('from', 0))
-            m, s = divmod(from_sec, 60)
-            h, m = divmod(m, 60)
-            await msg.edit_text(
-                f"✅ trace.moe topdi!\n\n"
-                f"🎬 Nomi: {title}\n"
-                f"🎯 O'xshashlik: {sim}%\n"
-                f"⏰ Sahna vaqti: {h:02}:{m:02}:{s:02}\n"
-                f"📊 Aniqlik: Juda yuqori"
-            )
+        elif update.message.video:
+            file = await update.message.video.get_file()
+            tmp_path = tempfile.mktemp(suffix='.mp4')
+            await file.download_to_drive(tmp_path)
+        else:
+            await status.edit_text("Iltimos rasm yuboring")
             return
 
-        # 2-QADAM: topolmasa Gemini
-        await msg.edit_text("🤖 trace.moe topolmadi, Gemini AI ga berdim...")
-        gemini_answer = search_gemini(image_for_search)
-        await msg.edit_text(f"🤖 Gemini AI javobi:\n\n{gemini_answer}")
+        await status.edit_text("🔍 trace.moe da qidiryapman...")
+        trace = search_trace_moe(tmp_path)
+        if trace:
+            sim = round(trace['similarity']*100, 1)
+            await status.edit_text(f"✅ Topildi!\n🎬 {trace.get('filename')}\n🎯 {sim}%\n⏰ {int(trace.get('from',0))} sek")
+            return
+
+        await status.edit_text("🤖 Gemini qarayapti...")
+        img = Image.open(tmp_path)
+        resp = model.generate_content(["Bu qaysi kino? Nomini, yilini ayt, o'zbek tilida.", img])
+        await status.edit_text(f"🤖 {resp.text}")
 
     except Exception as e:
-        await msg.edit_text(f"Xato bo'ldi: {e}")
+        await status.edit_text(f"Xato: {e}")
     finally:
         if tmp_path and os.path.exists(tmp_path):
-            try: os.remove(tmp_path)
-            except: pass
+            os.remove(tmp_path)
 
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.VIDEO | filters.PHOTO | filters.Document.ALL | filters.TEXT & ~filters.COMMAND, handle_media))
-    print("Bot ishga tushdi...")
+    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, handle))
     app.run_polling()
 
 if __name__ == "__main__":
