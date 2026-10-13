@@ -20,7 +20,7 @@ bot = telebot.TeleBot(TOKEN)
 user_videos = {}
 
 @bot.message_handler(commands=['start'])
-def start(m): bot.send_message(m.chat.id, "Salom! Link tashlang, 2 ta BEPUL AI tekshiradi!")
+def start(m): bot.send_message(m.chat.id, "Salom! Link tashlang!")
 
 @bot.message_handler(content_types=['text'])
 def handle(m):
@@ -34,9 +34,9 @@ def handle(m):
                 ydl.extract_info(m.text.strip(), download=True)
                 path = glob.glob(f"{tmpdir}/*")[0]
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🎬 Film nomi? (2x bepul AI)", callback_data="find"))
+            kb.add(types.InlineKeyboardButton("🎬 Film nomi?", callback_data="find"))
             with open(path, 'rb') as v:
-                sent = bot.send_video(m.chat.id, v, caption="✅ Yuklandi!", reply_markup=kb)
+                sent = bot.send_video(m.chat.id, v, caption="✅", reply_markup=kb)
             user_videos[m.chat.id] = sent.video.file_id
             bot.delete_message(m.chat.id, status.message_id)
     except Exception as e:
@@ -47,15 +47,15 @@ def ask_groq(frames, prompt):
     client = Groq(api_key=GROQ_KEY)
     content = [{"type": "text", "text": prompt}]
     for img in frames[:4]:
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG")
+        buf = io.BytesIO(); img.save(buf, format="JPEG")
         b64 = base64.b64encode(buf.getvalue()).decode()
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
 
+    # HOZIRGI KUNDA ISHLAYDIGAN ENG YANGI MODEL
     res = client.chat.completions.create(
-        model="llama-3.2-11b-vision-preview", # 100% bepul va ishlaydi
+        model="meta-llama/llama-4-maverick-17b-128e-instruct",
         messages=[{"role": "user", "content": content}],
-        max_tokens=600
+        max_tokens=700
     )
     return res.choices[0].message.content
 
@@ -63,8 +63,8 @@ def ask_groq(frames, prompt):
 def cb(call):
     chat_id = call.message.chat.id
     if chat_id not in user_videos: return
-    bot.answer_callback_query(call.id, "2 ta AI ishlamoqda...")
-    msg = bot.send_message(chat_id, "🧠 1-AI Gemini tekshirmoqda...")
+    bot.answer_callback_query(call.id, "Tekshirilmoqda...")
+    msg = bot.send_message(chat_id, "🧠 Gemini tekshirmoqda...")
     try:
         import cv2
         f = bot.get_file(user_videos[chat_id])
@@ -81,28 +81,19 @@ def cb(call):
                 _, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 frames.append(Image.open(io.BytesIO(buf.tobytes())))
         cap.release(); os.remove(p)
+        prompt = "Bu kadrlardagi film/serial nomini, yilini o'zbek tilida ayt."
 
-        prompt = "Bu kadrlardagi film/serial nomini, yilini, mazmunini o'zbek tilida ayt."
-
-        # 1-URINISH: GEMINI
         try:
-            res = gemini_client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=[prompt] + frames[:4]
-            )
-            bot.edit_message_text(f"🎬 Gemini topdi:\n{res.text}", chat_id, msg.message_id)
+            res = gemini_client.models.generate_content(model="gemini-2.0-flash", contents=[prompt] + frames[:4])
+            bot.edit_message_text(f"🎬 Gemini:\n{res.text}", chat_id, msg.message_id)
             return
         except Exception as e:
             print(f"Gemini xato: {e}")
-            bot.edit_message_text(f"⚠️ Gemini ishlamadi, 2-AI Groq tekshirmoqda...", chat_id, msg.message_id)
+            bot.edit_message_text(f"⚠️ Gemini xato, Groq ga o'tilmoqda...", chat_id, msg.message_id)
 
-        # 2-URINISH: GROQ
         if GROQ_KEY:
             answer = ask_groq(frames, prompt)
             bot.edit_message_text(f"🎬 Groq topdi:\n{answer}", chat_id, msg.message_id)
-        else:
-            bot.edit_message_text("GROQ_API_KEY qo'yilmagan.", chat_id, msg.message_id)
-
     except Exception as e:
         bot.edit_message_text(f"Xato: {e}", chat_id, msg.message_id)
 
