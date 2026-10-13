@@ -1,6 +1,6 @@
 pyTelegramBotAPI
 yt-dlp
-google-generativeai>=0.8.0
-opencv-python
+google-generativeai
 Pillow
 requests
+opencv-python-headless
