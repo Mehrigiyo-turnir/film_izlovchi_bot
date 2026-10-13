@@ -1,10 +1,9 @@
-import os, threading, io, glob, tempfile
+import os, threading, io, glob, tempfile, base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import telebot
 from telebot import types
 from PIL import Image
 from google import genai
-from google.genai import types as genai_types
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
@@ -14,15 +13,15 @@ threading.Thread(target=run_web, daemon=True).start()
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
+GROQ_KEY = os.environ.get("GROQ_API_KEY")
 
-# YANGI API CLIENT
-client = genai.Client(api_key=GEMINI_KEY)
+gemini_client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 
 bot = telebot.TeleBot(TOKEN)
 user_videos = {}
 
 @bot.message_handler(commands=['start'])
-def start(m): bot.send_message(m.chat.id, "Salom! Instagram link tashlang, yangi AI tekshiradi!")
+def start(m): bot.send_message(m.chat.id, "Salom! Link tashlang, 2 ta BEPUL AI tekshiradi!")
 
 @bot.message_handler(content_types=['text'])
 def handle(m):
@@ -31,25 +30,42 @@ def handle(m):
     try:
         import yt_dlp
         with tempfile.TemporaryDirectory() as tmpdir:
-            opts = {'outtmpl': f'{tmpdir}/video.%(ext)s', 'format': 'best', 'quiet': True, 'nocheckcertificate': True}
+            opts = {'outtmpl': f'{tmpdir}/video.%(ext)s', 'format': 'best', 'quiet': True}
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.extract_info(m.text.strip(), download=True)
                 path = glob.glob(f"{tmpdir}/*")[0]
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🎬 Film nomi? (Yangi AI)", callback_data="find"))
+            kb.add(types.InlineKeyboardButton("🎬 Film nomi? (2x bepul AI)", callback_data="find"))
             with open(path, 'rb') as v:
-                sent = bot.send_video(m.chat.id, v, caption="✅ Yuklandi! Pastni bosing 👇", reply_markup=kb)
+                sent = bot.send_video(m.chat.id, v, caption="✅ Yuklandi!", reply_markup=kb)
             user_videos[m.chat.id] = sent.video.file_id
             bot.delete_message(m.chat.id, status.message_id)
     except Exception as e:
         bot.edit_message_text(f"Xato: {e}", m.chat.id, status.message_id)
 
+def ask_groq(frames, prompt):
+    from groq import Groq
+    client = Groq(api_key=GROQ_KEY)
+    content = [{"type": "text", "text": prompt}]
+    for img in frames[:4]:
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+
+    res = client.chat.completions.create(
+        model="meta-llama/llama-4-scout-17b-16e-instruct", # Groq da bepul vision model
+        messages=[{"role": "user", "content": content}],
+        max_tokens=500
+    )
+    return res.choices[0].message.content
+
 @bot.callback_query_handler(func=lambda c: True)
 def cb(call):
     chat_id = call.message.chat.id
     if chat_id not in user_videos: return
-    bot.answer_callback_query(call.id, "Yangi API tekshirmoqda...")
-    msg = bot.send_message(chat_id, "🧠 Yangi Gemini 3.8 tekshirmoqda...")
+    bot.answer_callback_query(call.id, "2 ta AI ishlamoqda...")
+    msg = bot.send_message(chat_id, "🧠 1-AI Gemini tekshirmoqda...")
     try:
         import cv2
         f = bot.get_file(user_videos[chat_id])
@@ -67,28 +83,28 @@ def cb(call):
                 frames.append(Image.open(io.BytesIO(buf.tobytes())))
         cap.release(); os.remove(p)
 
-        # YANGI API DA SO'ROV
-        prompt = "Bu 10 ta kadr bitta o'zbek filmdan. Film nomini, yilini, mazmunini o'zbek tilida ayt."
+        prompt = "Bu kadrlardagi film/serial nomini, yilini, mazmunini o'zbek tilida ayt."
 
-        # Rasmlarni yangi formatga o'tkazish
-        content = [prompt] + frames[:4]
-
-        # Google tavsiya qilgan yangi model
-        response = client.models.generate_content(
-            model="gemini-2.0-flash", # yangi API da bu nom barqaror
-            contents=content
-        )
-        bot.edit_message_text(f"🎬 {response.text}", chat_id, msg.message_id)
-
-    except Exception as e:
-        # Agar 2.0 ham ishlamasa 3.8 ni sinab ko'rish
+        # 1-URINISH: GEMINI (bepul)
         try:
-            response = client.models.generate_content(
-                model="gemini-3.0-flash",
+            res = gemini_client.models.generate_content(
+                model="gemini-2.0-flash",
                 contents=[prompt] + frames[:4]
             )
-            bot.edit_message_text(f"🎬 {response.text}", chat_id, msg.message_id)
-        except Exception as e2:
-            bot.edit_message_text(f"AI xato: {e} | {e2}", chat_id, msg.message_id)
+            bot.edit_message_text(f"🎬 Gemini (bepul) topdi:\n{res.text}", chat_id, msg.message_id)
+            return
+        except Exception as e:
+            print(f"Gemini xato: {e}")
+            bot.edit_message_text(f"⚠️ Gemini xato, endi 2-AI Groq (bepul) tekshirmoqda...", chat_id, msg.message_id)
+
+        # 2-URINISH: GROQ (bepul zaxira)
+        if GROQ_KEY:
+            answer = ask_groq(frames, prompt)
+            bot.edit_message_text(f"🎬 Groq (bepul) topdi:\n{answer}", chat_id, msg.message_id)
+        else:
+            bot.edit_message_text("GROQ_API_KEY qo'yilmagan. Render Environment ga qo'shing.", chat_id, msg.message_id)
+
+    except Exception as e:
+        bot.edit_message_text(f"Xato: {e}", chat_id, msg.message_id)
 
 bot.infinity_polling()
