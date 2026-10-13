@@ -1,6 +1,7 @@
 pyTelegramBotAPI
 yt-dlp
 google-genai
+groq
 Pillow
 requests
 opencv-python-headless
