@@ -51,9 +51,9 @@ def ask_groq(frames, prompt):
         b64 = base64.b64encode(buf.getvalue()).decode()
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
 
-    # HOZIRGI KUNDA ISHLAYDIGAN ENG YANGI MODEL
+    # HOZIRGI ENG YANGI GROQ VISION MODELI
     res = client.chat.completions.create(
-        model="meta-llama/llama-4-maverick-17b-128e-instruct",
+        model="qwen/qwen3-32b",
         messages=[{"role": "user", "content": content}],
         max_tokens=700
     )
@@ -67,12 +67,10 @@ def cb(call):
     msg = bot.send_message(chat_id, "🧠 Gemini tekshirmoqda...")
     try:
         import cv2
-        f = bot.get_file(user_videos[chat_id])
-        d = bot.download_file(f.file_path)
+        f = bot.get_file(user_videos[chat_id]); d = bot.download_file(f.file_path)
         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf:
             tf.write(d); p=tf.name
-        cap = cv2.VideoCapture(p)
-        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 100
+        cap = cv2.VideoCapture(p); total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 100
         frames = []
         for i in range(10):
             cap.set(cv2.CAP_PROP_POS_FRAMES, int(total*(i+1)/11))
@@ -88,12 +86,12 @@ def cb(call):
             bot.edit_message_text(f"🎬 Gemini:\n{res.text}", chat_id, msg.message_id)
             return
         except Exception as e:
-            print(f"Gemini xato: {e}")
-            bot.edit_message_text(f"⚠️ Gemini xato, Groq ga o'tilmoqda...", chat_id, msg.message_id)
+            print(e)
+            bot.edit_message_text("⚠️ Gemini xato, Groq Qwen ga o'tilmoqda...", chat_id, msg.message_id)
 
         if GROQ_KEY:
             answer = ask_groq(frames, prompt)
-            bot.edit_message_text(f"🎬 Groq topdi:\n{answer}", chat_id, msg.message_id)
+            bot.edit_message_text(f"🎬 Groq Qwen topdi:\n{answer}", chat_id, msg.message_id)
     except Exception as e:
         bot.edit_message_text(f"Xato: {e}", chat_id, msg.message_id)
 
