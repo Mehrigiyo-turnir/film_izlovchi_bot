@@ -16,7 +16,6 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 GROQ_KEY = os.environ.get("GROQ_API_KEY")
 
 gemini_client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
-
 bot = telebot.TeleBot(TOKEN)
 user_videos = {}
 
@@ -54,9 +53,9 @@ def ask_groq(frames, prompt):
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
 
     res = client.chat.completions.create(
-        model="meta-llama/llama-4-scout-17b-16e-instruct", # Groq da bepul vision model
+        model="llama-3.2-11b-vision-preview", # 100% bepul va ishlaydi
         messages=[{"role": "user", "content": content}],
-        max_tokens=500
+        max_tokens=600
     )
     return res.choices[0].message.content
 
@@ -85,24 +84,24 @@ def cb(call):
 
         prompt = "Bu kadrlardagi film/serial nomini, yilini, mazmunini o'zbek tilida ayt."
 
-        # 1-URINISH: GEMINI (bepul)
+        # 1-URINISH: GEMINI
         try:
             res = gemini_client.models.generate_content(
                 model="gemini-2.0-flash",
                 contents=[prompt] + frames[:4]
             )
-            bot.edit_message_text(f"🎬 Gemini (bepul) topdi:\n{res.text}", chat_id, msg.message_id)
+            bot.edit_message_text(f"🎬 Gemini topdi:\n{res.text}", chat_id, msg.message_id)
             return
         except Exception as e:
             print(f"Gemini xato: {e}")
-            bot.edit_message_text(f"⚠️ Gemini xato, endi 2-AI Groq (bepul) tekshirmoqda...", chat_id, msg.message_id)
+            bot.edit_message_text(f"⚠️ Gemini ishlamadi, 2-AI Groq tekshirmoqda...", chat_id, msg.message_id)
 
-        # 2-URINISH: GROQ (bepul zaxira)
+        # 2-URINISH: GROQ
         if GROQ_KEY:
             answer = ask_groq(frames, prompt)
-            bot.edit_message_text(f"🎬 Groq (bepul) topdi:\n{answer}", chat_id, msg.message_id)
+            bot.edit_message_text(f"🎬 Groq topdi:\n{answer}", chat_id, msg.message_id)
         else:
-            bot.edit_message_text("GROQ_API_KEY qo'yilmagan. Render Environment ga qo'shing.", chat_id, msg.message_id)
+            bot.edit_message_text("GROQ_API_KEY qo'yilmagan.", chat_id, msg.message_id)
 
     except Exception as e:
         bot.edit_message_text(f"Xato: {e}", chat_id, msg.message_id)
