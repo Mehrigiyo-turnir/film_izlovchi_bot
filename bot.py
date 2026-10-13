@@ -3,7 +3,8 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import telebot
 from telebot import types
 from PIL import Image
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
@@ -12,34 +13,16 @@ def run_web():
 threading.Thread(target=run_web, daemon=True).start()
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
-GEMINI = os.environ.get("GEMINI_API_KEY")
-genai.configure(api_key=GEMINI)
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
-# Eng barqaror model - hamma yangi akkauntda ishlaydi
-def get_model():
-    # 1. Avval bor modellarni tekshiramiz
-    try:
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods and 'flash' in m.name:
-                print(f"Ishlaydigan model topildi: {m.name}")
-                return genai.GenerativeModel(m.name)
-    except Exception as e:
-        print(f"ListModels xato: {e}")
-
-    # 2. Qo'lda sinab ko'ramiz (eng yangidan eskiga)
-    for name in ["gemini-2.0-flash", "gemini-flash-latest", "gemini-2.0-flash-exp", "gemini-1.5-flash-latest"]:
-        try:
-            return genai.GenerativeModel(name)
-        except: continue
-    return genai.GenerativeModel("gemini-2.0-flash")
-
-model = get_model()
+# YANGI API CLIENT
+client = genai.Client(api_key=GEMINI_KEY)
 
 bot = telebot.TeleBot(TOKEN)
 user_videos = {}
 
 @bot.message_handler(commands=['start'])
-def start(m): bot.send_message(m.chat.id, "Salom! Instagram link tashlang.")
+def start(m): bot.send_message(m.chat.id, "Salom! Instagram link tashlang, yangi AI tekshiradi!")
 
 @bot.message_handler(content_types=['text'])
 def handle(m):
@@ -53,7 +36,7 @@ def handle(m):
                 ydl.extract_info(m.text.strip(), download=True)
                 path = glob.glob(f"{tmpdir}/*")[0]
             kb = types.InlineKeyboardMarkup()
-            kb.add(types.InlineKeyboardButton("🎬 Film nomi? (10 kadr)", callback_data="find"))
+            kb.add(types.InlineKeyboardButton("🎬 Film nomi? (Yangi AI)", callback_data="find"))
             with open(path, 'rb') as v:
                 sent = bot.send_video(m.chat.id, v, caption="✅ Yuklandi! Pastni bosing 👇", reply_markup=kb)
             user_videos[m.chat.id] = sent.video.file_id
@@ -65,8 +48,8 @@ def handle(m):
 def cb(call):
     chat_id = call.message.chat.id
     if chat_id not in user_videos: return
-    bot.answer_callback_query(call.id, "Tekshirilmoqda...")
-    msg = bot.send_message(chat_id, "🧠 10 ta kadridan tahlil qilinmoqda...")
+    bot.answer_callback_query(call.id, "Yangi API tekshirmoqda...")
+    msg = bot.send_message(chat_id, "🧠 Yangi Gemini 3.8 tekshirmoqda...")
     try:
         import cv2
         f = bot.get_file(user_videos[chat_id])
@@ -84,10 +67,28 @@ def cb(call):
                 frames.append(Image.open(io.BytesIO(buf.tobytes())))
         cap.release(); os.remove(p)
 
-        prompt = "Bu kadrlardagi filmni top. O'zbek tilida: nomi, yili, qisqa mazmuni."
-        res = model.generate_content([prompt] + frames[:4])
-        bot.edit_message_text(f"🎬 {res.text}", chat_id, msg.message_id)
+        # YANGI API DA SO'ROV
+        prompt = "Bu 10 ta kadr bitta o'zbek filmdan. Film nomini, yilini, mazmunini o'zbek tilida ayt."
+
+        # Rasmlarni yangi formatga o'tkazish
+        content = [prompt] + frames[:4]
+
+        # Google tavsiya qilgan yangi model
+        response = client.models.generate_content(
+            model="gemini-2.0-flash", # yangi API da bu nom barqaror
+            contents=content
+        )
+        bot.edit_message_text(f"🎬 {response.text}", chat_id, msg.message_id)
+
     except Exception as e:
-        bot.edit_message_text(f"AI xato: {e}", chat_id, msg.message_id)
+        # Agar 2.0 ham ishlamasa 3.8 ni sinab ko'rish
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.0-flash",
+                contents=[prompt] + frames[:4]
+            )
+            bot.edit_message_text(f"🎬 {response.text}", chat_id, msg.message_id)
+        except Exception as e2:
+            bot.edit_message_text(f"AI xato: {e} | {e2}", chat_id, msg.message_id)
 
 bot.infinity_polling()
